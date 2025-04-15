@@ -1,0 +1,4 @@
+# test_cryptoserver.yaml
+crypto:
+        Simple: tests/root/cryptoserver/Simple.pm
+        Cachemgr: tests/root/cryptoserver/cachemgr.pm

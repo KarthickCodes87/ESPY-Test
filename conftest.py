@@ -15,13 +15,14 @@ Returns:
 """
 from __future__ import annotations
 
+import logging
 import os
-import pytest #pylint: disable=import-error
-import requests #pylint: disable=import-error
 import stat
 import subprocess
 import tempfile
-import logging
+import pytest #pylint: disable=import-error
+import requests #pylint: disable=import-error
+
 
 DEBUG = False
 ESTEST_FILE = './ESTest.pl'
@@ -100,7 +101,10 @@ class ESTestSuiteFile(pytest.File):
 
         os.close(flakey_test_file_handle)
         os.close(stable_test_file_handle)
-        logger.info("Finished splitting test list into %s and %s tests", stable_test_path, flakey_test_path)
+        logger.info(
+            "Finished splitting test list into stable: %s and flakey: %s tests",
+            stable_test_path, flakey_test_path
+        )
         # run the stable tests and then the flakey tests
         yield ESTestItem.from_parent(
             self,

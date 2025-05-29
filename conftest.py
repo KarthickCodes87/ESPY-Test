@@ -10,13 +10,14 @@ Args:
     file_path: The path to the file being considered for collection.
 
 Returns:
-    ESTestSuiteFile: An instance of ESTestSuiteFile if the file matches the criteria, otherwise None.
+    ESTestSuiteFile: An instance of ESTestSuiteFile if the file matches the 
+    criteria, otherwise None.
 """
 from __future__ import annotations
 
 import os
-import pytest
-import requests
+import pytest #pylint: disable=import-error
+import requests #pylint: disable=import-error
 import stat
 import subprocess
 import tempfile
@@ -54,9 +55,11 @@ def pytest_collect_file(parent, file_path):
         return ESTestSuiteFile.from_parent(parent=parent, fspath=file_path)
 
 
-# Split the test list into two parts - stable and flakey
-#   a) stable tests - run them first
-#   b) flakey tests - run them after the stable tests
+"""
+Split the test list into two parts - stable and flakey
+stable tests - run them first
+flakey tests - run them after the stable tests
+"""
 class ESTestSuiteFile(pytest.File):
     def get_filter_status(self, test_name: str) -> bool:
         """
@@ -69,7 +72,7 @@ class ESTestSuiteFile(pytest.File):
                 if test_status == 'FALSE':
                     return False
             except Exception as e:
-                logger.warning("Failed to check %s: %s", EXTERNAL_SERVER, e.__str__())
+                logger.warning("Failed to check %s: %s", EXTERNAL_SERVER, str(e))
 
         return True
 
@@ -105,6 +108,11 @@ class ESTestSuiteFile(pytest.File):
             flakey_tests=flakey_test_path)
 
 
+"""
+Custom pytest item to run ESTest with stable and flakey tests.
+This class defines a pytest item that executes the ESTest.pl script with the 
+provided stable and flakey test lists.
+"""
 class ESTestHook:
     def __init__(self):
         tmpfile, tmpname = tempfile.mkstemp('.pl', 'tmp_', '.', text=True)
@@ -147,7 +155,10 @@ class ESTestHook:
                 os.remove(self.estest_wrapper)
         start_estest()
 
-
+"""
+This class defines a pytest item that executes the ESTest.pl script with 
+the provided stable and flakey test lists.
+"""
 class ESTestItem(pytest.Item):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -167,8 +178,18 @@ class ESTestItem(pytest.Item):
         return super().repr_failure(excinfo)
 
     def reportinfo(self):
-        return self.path, 0, f"test lists: {self.stable_tests} {self.flakey_tests}"
+        msg = f"test lists: {self.stable_tests} {self.flakey_tests}"
+        return self.path, 0, msg
 
-
+"""
+Custom exception for ESTest failures.
+"""
 class ESTestFailureException(Exception):
-    """Custom exception for error reporting."""
+    def __init__(self, item):
+        """
+        Initialize the exception with the item that caused the failure.
+        Args:
+            item: The pytest item that caused the ESTest failure.
+        """
+        super().__init__(f"ESTest failed for item: {item.name}")
+        self.item = item

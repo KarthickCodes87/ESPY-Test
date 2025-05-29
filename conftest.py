@@ -1,3 +1,17 @@
+"""
+Pytest hook to collect test files.
+
+This function is called by pytest to determine if a given file should be collected as a test suite.
+If the file has a `.list` extension and its name starts with the value of `TEST_LIST_FILE`, it is
+recognized as an ESTest suite file and an `ESTestSuiteFile` instance is returned for collection.
+
+Args:
+    parent: The parent collector node.
+    file_path: The path to the file being considered for collection.
+
+Returns:
+    ESTestSuiteFile: An instance of ESTestSuiteFile if the file matches the criteria, otherwise None.
+"""
 from __future__ import annotations
 
 import os
@@ -18,42 +32,58 @@ TEST_LIST_FILE = 'crypto_tests.list'
 logging.basicConfig(level=logging.INFO if DEBUG else logging.WARNING)
 logger = logging.getLogger(__name__)
 
+
 def pytest_collect_file(parent, file_path):
+    """
+    Pytest hook to collect custom test suite files during test discovery.
+
+    This function checks if the given file has a `.list` extension and its name starts with
+    the value of `TEST_LIST_FILE`. If both conditions are met, it logs the discovery and
+    returns an `ESTestSuiteFile` collector for the file, enabling pytest to collect tests
+    from custom suite files.
+
+    Args:
+        parent: The parent collector node in the pytest collection tree.
+        file_path: The path to the file being considered for collection.
+
+    Returns:
+        An instance of `ESTestSuiteFile` if the file matches the criteria, otherwise `None`.
+    """
     if file_path.suffix == ".list" and file_path.name.startswith(TEST_LIST_FILE):
-        logger.info(f"Found ESTest suite file {TEST_LIST_FILE} in {file_path}")
+        logger.info("Found ESTest suite file %s in %s", TEST_LIST_FILE, file_path)
         return ESTestSuiteFile.from_parent(parent=parent, fspath=file_path)
 
 
 # Split the test list into two parts - stable and flakey
 #   a) stable tests - run them first
 #   b) flakey tests - run them after the stable tests
-class ESTestSuiteFile(pytest.File): 
+class ESTestSuiteFile(pytest.File):
     def get_filter_status(self, test_name: str) -> bool:
-        # if it is flakey, return False
-        # else return True
+        """
+        if it is flakey, return False
+        """
         if GREEN_MODE:
-            # TODO external server to be replaced with 
-            # http://ghost-test-api.engr.akamai.com/results/
             try:
-                logger.info(f"Checking status for {test_name}")
+                logger.info("Checking status for %s", test_name.strip())
                 test_status = requests.get(EXTERNAL_SERVER).text
                 if test_status == 'FALSE':
                     return False
             except Exception as e:
-                logger.warning(f"Failed to check {EXTERNAL_SERVER}: {e}")
-            
+                logger.warning("Failed to check %s: %s", EXTERNAL_SERVER, e.__str__())
+
         return True
-    
+
     def collect(self):
-        # read all the tests in the test list 
-        # before calling the the wrapper for ESTest, rearrange the test list order
-        # based on how stable it is
-        logger.info(f"Starting to split {TEST_LIST_FILE} into stable and flakey tests")
+        """
+        read all the tests in the test list
+        before calling the the wrapper for ESTest, rearrange the test list order
+        """
+        logger.info("Starting to split into stable and flakey tests")
         flakey_test_file_handle, flakey_test_path = tempfile.mkstemp(
             '.list', 'crypto_flakey_tests_', '.', text=True)
         stable_test_file_handle, stable_test_path = tempfile.mkstemp(
             '.list', 'crypto_stable_tests_', '.', text=True)
-        
+
         with open(TEST_LIST_FILE) as fd:
             for test_name in fd:
                 if test_name.strip().startswith('#'):
@@ -67,12 +97,11 @@ class ESTestSuiteFile(pytest.File):
 
         os.close(flakey_test_file_handle)
         os.close(stable_test_file_handle)
-        logger.info(
-            f"Finished splitting test list into {stable_test_path} and {flakey_test_path} tests")
-        # run the stable tests and then the flakey tests   
+        logger.info("Finished splitting test list into %s and %s tests", stable_test_path, flakey_test_path)
+        # run the stable tests and then the flakey tests
         yield ESTestItem.from_parent(
-            self, 
-            stable_tests=stable_test_path, 
+            self,
+            stable_tests=stable_test_path,
             flakey_tests=flakey_test_path)
 
 
@@ -81,8 +110,12 @@ class ESTestHook:
         tmpfile, tmpname = tempfile.mkstemp('.pl', 'tmp_', '.', text=True)
         self.estest_wrapper_handle = tmpfile
         self.estest_wrapper = tmpname
-    
+        self.return_code = 0
+
     def call_estest(self, stable_list, flakey_list):
+        """
+        Call the ESTest.pl script with the stable and flakey test lists.
+        """
         stable_list = stable_list.split("/")[-1]
         flakey_list = flakey_list.split("/")[-1]
 
@@ -91,10 +124,10 @@ class ESTestHook:
             final_list += ' '
             final_list += f'tests/root/cryptoserver/{flakey_list}'
             return final_list
-        
-        def start_estest(*args):
+
+        def start_estest():
             tests_to_run = "%s" % (get_test_lists())
-            logger.info(f"Running ESTest with test list: {tests_to_run}")
+            logger.info("Running ESTest with test list: %s", tests_to_run)
             os.write(self.estest_wrapper_handle, (r'''#!/usr/bin/perl
 {
     local @ARGV = ("-root", "-log_sections=all", "-logdir=logs/", "%s");
@@ -105,10 +138,9 @@ class ESTestHook:
             os.close(self.estest_wrapper_handle)
             os.chmod(self.estest_wrapper, stat.S_IXUSR)
             retcode = subprocess.call(
-                "%s" % (self.estest_wrapper), 
-                shell=True, 
-#                timeout=SUITE_TIMEOUT,
-                stderr=subprocess.PIPE, 
+                "%s" % (self.estest_wrapper),
+                shell=True,
+                stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE)
             self.return_code = retcode
             if not DEBUG:
@@ -129,7 +161,7 @@ class ESTestItem(pytest.Item):
             raise ESTestFailureException(self)
 
     def repr_failure(self, excinfo):
-        """Called when self.runtest() raises an exception.""" 
+        """Called when self.runtest() raises an exception."""
         if isinstance(excinfo.value, ESTestFailureException):
             return "\n".join(["execution failed"])
         return super().repr_failure(excinfo)

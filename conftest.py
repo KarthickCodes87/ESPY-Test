@@ -24,7 +24,7 @@ import pytest #pylint: disable=import-error
 import requests #pylint: disable=import-error
 
 
-DEBUG = False
+DEBUG = True
 ESTEST_FILE = './ESTest.pl'
 EXTERNAL_SERVER = "http://localhost:8000/"
 GREEN_MODE = os.getenv('GREEN_MODE', 'True').lower() == 'true'  # Read from ENV, default to True
@@ -69,11 +69,12 @@ class ESTestSuiteFile(pytest.File):
         if GREEN_MODE:
             try:
                 logger.info("Checking status for %s", test_name.strip())
-                test_status = requests.get(EXTERNAL_SERVER).text
-                if test_status == 'FALSE':
+                test_status = requests.get(EXTERNAL_SERVER).json()
+                if not test_status.get('result'):
                     return False
             except Exception as e:
                 logger.warning("Failed to check %s: %s", EXTERNAL_SERVER, str(e))
+                logger.warning("Assuming test is stable")
 
         return True
 
@@ -82,7 +83,7 @@ class ESTestSuiteFile(pytest.File):
         read all the tests in the test list
         before calling the the wrapper for ESTest, rearrange the test list order
         """
-        logger.info("Starting to split into stable and flakey tests")
+        logger.debug("Starting to split into stable and flakey tests")
         flakey_test_file_handle, flakey_test_path = tempfile.mkstemp(
             '.list', 'crypto_flakey_tests_', '.', text=True)
         stable_test_file_handle, stable_test_path = tempfile.mkstemp(
@@ -93,15 +94,15 @@ class ESTestSuiteFile(pytest.File):
                 if test_name.strip().startswith('#'):
                     # skip comments
                     continue
-                get_status = self.get_filter_status(test_name)
+                status = self.get_filter_status(test_name)
                 file_handle = flakey_test_file_handle
-                if get_status:
+                if status:
                     file_handle = stable_test_file_handle
                 os.write(file_handle, test_name.encode('utf-8'))
 
         os.close(flakey_test_file_handle)
         os.close(stable_test_file_handle)
-        logger.info(
+        logger.debug(
             "Finished splitting test list into stable: %s and flakey: %s tests",
             stable_test_path, flakey_test_path
         )

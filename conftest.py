@@ -30,8 +30,9 @@ EXTERNAL_SERVER = "http://localhost:8000/"
 GREEN_MODE = os.getenv('GREEN_MODE', 'True').lower() == 'true'  # Read from ENV, default to True
 #SUITE_TIMEOUT = 1000
 TEST_LIST_FILE = 'crypto_tests.list'
+TEST_LIST_PATH = 'tests/root/cryptoserver/'
 
-logging.basicConfig(level=logging.INFO if DEBUG else logging.WARNING)
+logging.basicConfig(level=logging.DEBUG if DEBUG else logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
@@ -53,6 +54,7 @@ def pytest_collect_file(parent, file_path):
     """
     if file_path.suffix == ".list" and file_path.name.startswith(TEST_LIST_FILE):
         logger.info("Found ESTest suite file %s in %s", TEST_LIST_FILE, file_path)
+        #globals()['TEST_LIST_PATH'] = str(file_path)
         return ESTestSuiteFile.from_parent(parent=parent, fspath=file_path)
 
 
@@ -89,7 +91,7 @@ class ESTestSuiteFile(pytest.File):
         stable_test_file_handle, stable_test_path = tempfile.mkstemp(
             '.list', 'crypto_stable_tests_', '.', text=True)
 
-        with open(TEST_LIST_FILE) as fd:
+        with open(TEST_LIST_PATH + TEST_LIST_FILE) as fd:
             for test_name in fd:
                 if test_name.strip().startswith('#'):
                     # skip comments
@@ -102,15 +104,18 @@ class ESTestSuiteFile(pytest.File):
 
         os.close(flakey_test_file_handle)
         os.close(stable_test_file_handle)
+        # Move these files to tests/root/cryptoserver
+        os.rename(stable_test_path, f'{TEST_LIST_PATH}/crypto_stable_tests.list')
+        os.rename(flakey_test_path, f'{TEST_LIST_PATH}/crypto_flakey_tests.list')
         logger.debug(
             "Finished splitting test list into stable: %s and flakey: %s tests",
             stable_test_path, flakey_test_path
         )
-        # run the stable tests and then the flakey tests
+        # run the stable and flakey tests
         yield ESTestItem.from_parent(
             self,
-            stable_tests=stable_test_path,
-            flakey_tests=flakey_test_path)
+            stable_tests=f'{TEST_LIST_PATH}/crypto_stable_tests.list',
+            flakey_tests=f'{TEST_LIST_PATH}/crypto_flakey_tests.list')
 
 
 """
@@ -129,24 +134,17 @@ class ESTestHook:
         """
         Call the ESTest.pl script with the stable and flakey test lists.
         """
-        stable_list = stable_list.split("/")[-1]
-        flakey_list = flakey_list.split("/")[-1]
-
         def get_test_lists():
-            final_list = f'tests/root/cryptoserver/{stable_list}'
-            final_list += ' '
-            final_list += f'tests/root/cryptoserver/{flakey_list}'
-            return final_list
+            return f'{stable_list}', f'{flakey_list}'
 
         def start_estest():
-            tests_to_run = "%s" % (get_test_lists())
-            logger.info("Running ESTest with test list: %s", tests_to_run)
+            stable_test, flakey_test = get_test_lists()
             os.write(self.estest_wrapper_handle, (r'''#!/usr/bin/perl
 {
-    local @ARGV = ("-root", "-log_sections=all", "-logdir=logs/", "%s");
+    local @ARGV = ("-root", "-log_sections=all", "-logdir=logs/", "%s", "%s");
     do '%s';
 }
-''' % (tests_to_run, ESTEST_FILE)).encode('utf-8'))
+''' % (stable_test, flakey_test, ESTEST_FILE)).encode('utf-8'))
 
             os.close(self.estest_wrapper_handle)
             os.chmod(self.estest_wrapper, stat.S_IXUSR)
@@ -158,6 +156,7 @@ class ESTestHook:
             self.return_code = retcode
             if not DEBUG:
                 os.remove(self.estest_wrapper)
+
         start_estest()
 
 """
@@ -166,7 +165,7 @@ the provided stable and flakey test lists.
 """
 class ESTestItem(pytest.Item):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(name='Crypto', parent=kwargs.get('parent'))
         self.stable_tests = kwargs.get('stable_tests')
         self.flakey_tests = kwargs.get('flakey_tests')
 

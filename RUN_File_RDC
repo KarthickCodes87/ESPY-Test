@@ -1,0 +1,140 @@
+#!/bin/csh -f
+#
+# File: RUN.forRoot.temp
+# Last Update: 11-15-2000
+#
+# Any test requires 'root' access should use this template instead!!!
+#
+# Template for newly developed test cases. Each new test needs to have
+# a 'RUN' script to interface with RunBats. Without RUN sccript, RunBats
+# will NOT execute your new test case at all.
+#
+
+set user=`id -un`
+set host=`uname -n`
+set envfile=/tmp/.batsenv
+if ($user == "root") then
+    if (-f $envfile) then
+        source $envfile
+    endif
+endif
+#
+set extraarg=""
+if ($#argv == 1) then
+    set date=$1
+else if ($#argv == 2) then
+    set date=$1
+    if ($2 == "-c") then
+        set extraarg="-metatest"
+    endif
+else
+    set date=`date '+%m%d%H%M'`
+endif
+#
+#
+#
+set localrun=0
+set coredump=0
+set failed=0
+#
+# Get the real IP address using 'eth0'
+#
+set myip=`ip -4 addr | grep "scope global eth0" | awk '{print $2}' | cut -d'/' -f1`
+set localhost=127.0.0.1
+#
+# If AKAMAI_BATS_GHOST1 wasn't set, then we can safely assume ghost will be
+# THE machine that we are residing now.
+#
+set ghost=`printenv AKAMAI_BATS_GHOST1`
+if ("$ghost" == "") then
+    set localrun=1
+    # Server and Ghost are run on the same machine
+    set  ghost=$localhost
+    set server=$localhost
+else if ("$ghost" == "$localhost") then
+    set localrun=1
+    set server=$localhost
+else
+    set server=$myip
+endif
+set gport=`printenv AKAMAI_BATS_PORT`
+if ("$gport" == "") then
+    set gport=80
+endif
+set user=`printenv AKAMAI_BATS_USR`
+if ("$user" == "") then
+    set user=root
+endif
+set sslport=`printenv AKAMAI_BATS_SSL`
+if ("$sslport" == "") then
+    set sslport=443
+endif
+set akamai_bin=`printenv AKAMAI_BATS_BIN`
+if ("$akamai_bin" == "") then
+    set akamai_bin=../bin
+endif
+set path=($akamai_bin $path)
+
+set logdir=`printenv AKAMAI_BATS_LOG_DIR`
+if ("$logdir" == "") then
+  set logdir=`pwd`/logs
+else
+   set logdir="$logdir/RootRdcESTest"
+endif
+#--------------------------------------------------------------------
+#
+# STEP 1: Replace YOUR_TEST and YOUR_TEST_OPTIONS with your data
+#
+#--------------------------------------------------------------------
+set exe_dir=../ESTest/
+set exe=./ESTest.pl
+if (! -x $exe_dir$exe) then
+    if (-w $exe_dir$exe) then
+        chmod 0777 $exe_dir$exe
+    else
+        chmod 0555 $exe_dir$exe
+    endif
+endif
+cd $exe_dir
+
+set test="tests/root/examples/SimpleRestart.pm tests/root/rdc/rdc.list"
+
+
+# Force ipv6 mode if ESTEST_FORCE_IPV6 environment
+# variable is set
+if ("`printenv ESTEST_FORCE_IPV6`" == "1") then
+  set extraarg=" $extraarg -force_ip_mode=ipv6 "
+endif
+
+# Force SPDY/2, SPDY/3 or SPDY/3.1 if ESTEST_FORCE_SPDY# or HTTP2 if ESTEST_FORCE_HTTP2 environment
+# variable is set
+if ("`printenv ESTEST_FORCE_SPDY2`" == "1") then
+  set extraarg="$extraarg -force_spdy_ver=2"
+else if ("`printenv ESTEST_FORCE_SPDY3`" == "1") then
+  set extraarg="$extraarg -force_spdy_ver=3"
+else if ("`printenv ESTEST_FORCE_SPDY31`" == "1") then
+  set extraarg="$extraarg -force_spdy_ver=3.1"
+else if ("`printenv ESTEST_FORCE_HTTP2`" == "1") then
+  set extraarg="$extraarg -force_spdy_ver=http2"
+else if ("`printenv ESTEST_ONLY_HTTP1`" == "1") then
+  set extraarg="$extraarg -onlyhttp1"
+else if ("`printenv ESTEST_ONLY_HTTP2`" == "1") then
+  set extraarg="$extraarg -onlyhttp2"
+else if ("`printenv ESTEST_ALL_PROTO`" == "1") then
+  set extraarg="$extraarg -allproto"
+endif
+
+echo $exe $extraarg -g $ghost -p $gport -s $sslport -logdir $logdir -perlerr_noabort -root $test
+if ("`printenv GREEN_MODE`" == "true") then
+  pytest ../ESTest/tests/root/rdc/
+  set test="tests/root/rdc/rdc_stable_tests.list tests/root/rdc/rdc_flakey_tests.list"
+endif  
+$exe $extraarg -label RootRdcESTest -g $ghost -p $gport -s $sslport -logdir $logdir -perlerr_noabort -root $test
+
+set exitcode=$status
+if (-f core) then
+    @ coredump++
+    /bin/mv core core_$date
+endif
+exit $exitcode
+
